@@ -1,0 +1,83 @@
+#Key changes compared to your old Dockerfile
+#Base image is Ubuntu 22.04 → you fully control tool versions.
+#Installed Node.js from tarball and forced npm + yarn versions.
+#Installed Gradle from official zip distribution (instead of using prebuilt gradle image).
+#Installed Android SDK/NDK fresh.
+#Added PATH cleanup so Jenkins won’t fall back to system Node.
+# Start from Ubuntu 22.04
+FROM ubuntu:22.04
+
+LABEL org.opencontainers.image.version="1.0"
+LABEL org.opencontainers.image.ref.name="custom-android-node-ubuntu"
+
+# Build arguments (customize versions as needed)
+ARG NODE_VERSION=23.0.0
+ARG NPM_VERSION=10.9.0
+ARG YARN_VERSION=1.22.22
+ARG GRADLE_VERSION=8.11.1
+ARG SDK_VERSION=commandlinetools-linux-11076708_latest.zip
+ARG ANDROID_BUILD_VERSION=35
+ARG ANDROID_TOOLS_VERSION=35.0.0
+ARG NDK_VERSION=26.3.11579264
+ARG BUCK_VERSION=2023.10.01.01
+
+# Environment
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ANDROID_HOME=/opt/android
+ENV ANDROID_SDK_ROOT=/opt/android
+ENV ANDROID_NDK_HOME=/opt/android/ndk/${NDK_VERSION}
+ENV NODEJS_HOME=/usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64
+ENV GRADLE_HOME=/opt/gradle/gradle-${GRADLE_VERSION}
+ENV PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$NODEJS_HOME/bin:$GRADLE_HOME/bin:$PATH
+
+# Install base dependencies
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    curl unzip jq git xz-utils zip sudo python3 python3-distutils \
+    openjdk-17-jdk-headless gcc g++ make ninja-build \
+    libc++-dev libgl1 libicu-dev gnupg2 ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# -----------------
+# Install Node.js + npm + yarn
+# -----------------
+RUN curl -fsSLO https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz && \
+    mkdir -p /usr/local/lib/nodejs && \
+    tar -xJf node-v${NODE_VERSION}-linux-x64.tar.xz -C /usr/local/lib/nodejs && \
+    rm node-v${NODE_VERSION}-linux-x64.tar.xz && \
+    npm install -g npm@${NPM_VERSION} && \
+    npm install -g yarn@${YARN_VERSION}
+
+# -----------------
+# Install Gradle
+# -----------------
+RUN curl -sSLo gradle.zip https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    mkdir -p /opt/gradle && \
+    unzip -q gradle.zip -d /opt/gradle && \
+    rm gradle.zip
+
+# -----------------
+# Install Android SDK + NDK
+# -----------------
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools && \
+    curl -sS https://dl.google.com/android/repository/${SDK_VERSION} -o /tmp/sdk.zip && \
+    unzip -q /tmp/sdk.zip -d ${ANDROID_HOME}/cmdline-tools && \
+    mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest && \
+    rm /tmp/sdk.zip && \
+    yes | sdkmanager --licenses && \
+    yes | sdkmanager "platform-tools" "build-tools;${ANDROID_TOOLS_VERSION}" \
+                     "platforms;android-${ANDROID_BUILD_VERSION}" \
+                     "ndk;${NDK_VERSION}"
+
+# -----------------
+# Install Buck
+# -----------------
+RUN curl -L https://jitpack.io/com/github/facebook/buck/v${BUCK_VERSION}/buck-v${BUCK_VERSION}-java11.pex -o /usr/local/bin/buck && \
+    chmod +x /usr/local/bin/buck
+
+# -----------------
+# Verify installations
+# -----------------
+RUN java -version && \
+    node -v && npm -v && yarn -v && gradle -v && buck --version
+
+CMD ["/bin/bash"]
